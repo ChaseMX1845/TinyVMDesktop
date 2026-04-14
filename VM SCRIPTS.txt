@@ -1,3 +1,7 @@
+virsh --connect qemu:///session destroy windows-10 2>/dev/null
+virsh --connect qemu:///session undefine windows-10 --nvram 2>/dev/null
+rm -rf /home/VM/tinyvm/vms/windows-10
+
 Virtio
 wget https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/latest-virtio/virtio-win.iso
 
