@@ -1,0 +1,152 @@
+CODE
+
+
+mkdir -p /home/vm/tinyvm/{bin,profiles,isos,vms}
+
+
+Then 
+
+
+nano /home/vm/tinyvm/bin/create-vm.sh
+
+
+PASTE THIS INTO IT:
+-------------------------------------------------------
+
+
+#!/bin/bash
+
+set -e
+
+BASE_DIR="/home/vm/tinyvm"
+VM_DIR="$BASE_DIR/vms"
+ISO_DIR="$BASE_DIR/isos"
+
+PROFILE_FILE="$1"
+
+if [ -z "$PROFILE_FILE" ] || [ ! -f "$PROFILE_FILE" ]; then
+    echo "Profile file missing."
+    exit 1
+fi
+
+# shellcheck disable=SC1090
+source "$PROFILE_FILE"
+
+echo "=============================="
+echo "Tiny VM Desktop - Create VM"
+echo "=============================="
+echo "Profile: $PROFILE_NAME"
+echo
+
+read -rp "VM name [$DEFAULT_VM_NAME]: " VM_NAME
+VM_NAME="${VM_NAME:-$DEFAULT_VM_NAME}"
+
+read -rp "RAM in MB [$DEFAULT_RAM]: " RAM_MB
+RAM_MB="${RAM_MB:-$DEFAULT_RAM}"
+
+read -rp "CPU cores [$DEFAULT_CPUS]: " CPU_CORES
+CPU_CORES="${CPU_CORES:-$DEFAULT_CPUS}"
+
+read -rp "Max disk size in GB [$DEFAULT_DISK_GB]: " DISK_GB
+DISK_GB="${DISK_GB:-$DEFAULT_DISK_GB}"
+
+echo
+echo "ISO path examples:"
+echo "  $ISO_DIR"
+echo "  /home/vm/Downloads"
+echo
+
+read -rp "Full ISO path: " ISO_PATH
+
+if [ ! -f "$ISO_PATH" ]; then
+    echo "ISO not found: $ISO_PATH"
+    exit 1
+fi
+
+VM_PATH="$VM_DIR/$VM_NAME"
+DISK_PATH="$VM_PATH/${VM_NAME}.qcow2"
+
+mkdir -p "$VM_PATH"
+
+if [ -f "$DISK_PATH" ]; then
+    echo "Disk already exists: $DISK_PATH"
+    exit 1
+fi
+
+echo
+echo "Creating thin-provisioned qcow2 disk..."
+qemu-img create -f qcow2 "$DISK_PATH" "${DISK_GB}G"
+
+echo
+echo "Creating VM..."
+virt-install \
+  --connect qemu:///session \
+  --name "$VM_NAME" \
+  --memory "$RAM_MB" \
+  --vcpus "$CPU_CORES" \
+  --disk path="$DISK_PATH",format=qcow2,bus=virtio \
+  --cdrom "$ISO_PATH" \
+  --os-variant "$OS_VARIANT" \
+  --network network=default,model=virtio \
+  --graphics spice \
+  --video qxl \
+  --sound ich9 \
+  --boot cdrom,hd \
+  --noautoconsole
+
+echo
+echo "VM created successfully."
+echo "Disk: $DISK_PATH"
+echo
+echo "Open it with:"
+echo "virt-manager --connect qemu:///session"
+
+
+
+END
+--------------------------
+NOW:
+
+Make it executable:
+chmod +x /home/vm/tinyvm/bin/create-vm.sh
+
+
+
+RUN IT WITH:
+/home/vm/tinyvm/bin/tinyvm-menu.sh
+
+
+
+--------------------------------------------------------------------
+
+
+Add to IceWM Menu
+
+nano /home/vm/.icewm/menu
+
+ADD THIS BLOCK AT THE END OF LIST:
+
+prog "Tiny VM Desktop" exec /home/vm/tinyvm/bin/tinyvm-menu.sh
+
+SAVE AND EXIT
+
+
+NOW: 
+icewm --restart
+
+
+--------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
+
