@@ -13,6 +13,10 @@ DEFAULT_RAM="1024"
 DEFAULT_CPUS="1"
 DEFAULT_DISK_GB="20"
 OS_VARIANT="winxp"
+VIDEO_MODEL="vga"
+DISK_BUS="ide"
+NET_MODEL="rtl8139"
+GRAPHICS_TYPE="vnc"
 
 
 ------------------------------------------------------
