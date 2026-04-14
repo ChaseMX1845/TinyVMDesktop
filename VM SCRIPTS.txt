@@ -1,3 +1,8 @@
+Virtio
+wget https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/latest-virtio/virtio-win.iso
+
+
+
 WINDOWS XP SCRIPT
 
 
