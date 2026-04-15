@@ -1,3 +1,7 @@
+IFS='|' read -r ID TYPE MODE LABEL QUICKGET_OS QUICKGET_RELEASE DEFAULT_RAM DEFAULT_CPU DEFAULT_DISK NOTES <<< "$RECORD"
+
+
+
 readarray -t OS_LIST <<'EOF'
 # id|type|mode|label|quickget_os|quickget_release|ram|cpu|disk|notes
 
