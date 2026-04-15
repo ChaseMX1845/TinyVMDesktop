@@ -1,0 +1,5 @@
+Installer-tiny-vm terminal 
+
+
+chmod +x install-tinyvm-v2.sh
+./install-tinyvm-v2.sh
