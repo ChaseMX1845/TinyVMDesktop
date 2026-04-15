@@ -444,3 +444,208 @@ ls /home/VM/tinyvm/profiles
 
 
 
+
+MAC STUFF
+
+
+mkdir -p /home/VM/tinyvm/macos/{opencore,installers,vms,scripts}
+
+sudo apt update
+sudo apt install qemu-system-x86 ovmf qemu-utils
+
+nano /home/VM/tinyvm/macos/scripts/launch-macos.sh
+
+SCRIPT
+---------------------------------------------------------------------
+#!/bin/bash
+
+set -e
+
+BASE="/home/VM/tinyvm/macos"
+OC_ISO="$BASE/opencore/LongQT-OpenCore-v0.7.iso"
+VMS_DIR="$BASE/vms"
+INSTALLERS_DIR="$BASE/installers"
+
+find_ovmf_code() {
+    for p in \
+        /usr/share/OVMF/OVMF_CODE.fd \
+        /usr/share/OVMF/OVMF_CODE_4M.fd \
+        /usr/share/edk2/ovmf/OVMF_CODE.fd \
+        /usr/share/edk2/x64/OVMF_CODE.fd
+    do
+        [ -f "$p" ] && { echo "$p"; return 0; }
+    done
+    return 1
+}
+
+find_ovmf_vars() {
+    for p in \
+        /usr/share/OVMF/OVMF_VARS.fd \
+        /usr/share/OVMF/OVMF_VARS_4M.fd \
+        /usr/share/edk2/ovmf/OVMF_VARS.fd \
+        /usr/share/edk2/x64/OVMF_VARS.fd
+    do
+        [ -f "$p" ] && { echo "$p"; return 0; }
+    done
+    return 1
+}
+
+OVMF_CODE="$(find_ovmf_code || true)"
+OVMF_VARS_TEMPLATE="$(find_ovmf_vars || true)"
+
+if [ ! -f "$OC_ISO" ]; then
+    echo "OpenCore ISO not found:"
+    echo "  $OC_ISO"
+    exit 1
+fi
+
+if [ -z "$OVMF_CODE" ] || [ -z "$OVMF_VARS_TEMPLATE" ]; then
+    echo "OVMF firmware files not found."
+    echo "Install package: ovmf"
+    exit 1
+fi
+
+echo "================================"
+echo "Tiny VM Desktop - macOS Launcher"
+echo "================================"
+echo
+echo "Choose profile:"
+echo "1) High Sierra / Mojave / Catalina"
+echo "2) Big Sur / Monterey"
+echo "3) Ventura / Sonoma / Sequoia / Tahoe"
+echo
+
+read -rp "Profile [1]: " PROFILE
+PROFILE="${PROFILE:-1}"
+
+case "$PROFILE" in
+    1)
+        PROFILE_NAME="macOS Legacy"
+        DEFAULT_VM_NAME="macos-legacy"
+        DEFAULT_RAM="4096"
+        DEFAULT_CPUS="2"
+        DEFAULT_DISK_GB="50"
+        ;;
+    2)
+        PROFILE_NAME="macOS Mid"
+        DEFAULT_VM_NAME="macos-mid"
+        DEFAULT_RAM="6144"
+        DEFAULT_CPUS="4"
+        DEFAULT_DISK_GB="70"
+        ;;
+    3)
+        PROFILE_NAME="macOS Modern"
+        DEFAULT_VM_NAME="macos-modern"
+        DEFAULT_RAM="8192"
+        DEFAULT_CPUS="4"
+        DEFAULT_DISK_GB="100"
+        ;;
+    *)
+        echo "Invalid choice."
+        exit 1
+        ;;
+esac
+
+echo
+echo "Profile: $PROFILE_NAME"
+echo
+
+read -rp "VM name [$DEFAULT_VM_NAME]: " VM_NAME
+VM_NAME="${VM_NAME:-$DEFAULT_VM_NAME}"
+
+read -rp "RAM in MB [$DEFAULT_RAM]: " RAM_MB
+RAM_MB="${RAM_MB:-$DEFAULT_RAM}"
+
+read -rp "CPU cores [$DEFAULT_CPUS]: " CPU_CORES
+CPU_CORES="${CPU_CORES:-$DEFAULT_CPUS}"
+
+read -rp "Max disk size in GB [$DEFAULT_DISK_GB]: " DISK_GB
+DISK_GB="${DISK_GB:-$DEFAULT_DISK_GB}"
+
+echo
+echo "Installer image path."
+echo "Use a macOS installer/recovery image you already prepared."
+echo "Leave blank to boot OpenCore only."
+echo "Examples:"
+echo "  $INSTALLERS_DIR"
+echo "  /home/VM/Downloads"
+echo
+
+read -rp "Installer image path [blank to skip]: " INSTALLER_PATH
+
+VM_PATH="$VMS_DIR/$VM_NAME"
+DISK_PATH="$VM_PATH/${VM_NAME}.qcow2"
+VARS_PATH="$VM_PATH/OVMF_VARS.fd"
+
+mkdir -p "$VM_PATH"
+
+if [ ! -f "$DISK_PATH" ]; then
+    echo
+    echo "Creating thin-provisioned qcow2 disk..."
+    qemu-img create -f qcow2 "$DISK_PATH" "${DISK_GB}G"
+fi
+
+if [ ! -f "$VARS_PATH" ]; then
+    cp "$OVMF_VARS_TEMPLATE" "$VARS_PATH"
+fi
+
+QEMU_CMD=(
+    qemu-system-x86_64
+    -enable-kvm
+    -machine q35,accel=kvm
+    -m "$RAM_MB"
+    -smp "$CPU_CORES",cores="$CPU_CORES",threads=1,sockets=1
+    -cpu host
+    -device ich9-intel-hda
+    -device hda-duplex
+    -device qemu-xhci
+    -device usb-kbd
+    -device usb-tablet
+    -device ich9-ahci,id=sata
+    -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE"
+    -drive if=pflash,format=raw,file="$VARS_PATH"
+    -drive id=OpenCore,if=none,format=raw,readonly=on,file="$OC_ISO"
+    -device ide-cd,bus=sata.2,drive=OpenCore
+    -drive id=SystemDisk,if=none,file="$DISK_PATH",format=qcow2
+    -device ide-hd,bus=sata.4,drive=SystemDisk
+    -netdev user,id=net0
+    -device e1000-82545em,netdev=net0
+    -boot menu=on
+    -display gtk,gl=off
+)
+
+if [ -n "$INSTALLER_PATH" ]; then
+    if [ ! -f "$INSTALLER_PATH" ]; then
+        echo "Installer image not found:"
+        echo "  $INSTALLER_PATH"
+        exit 1
+    fi
+
+    QEMU_CMD+=(
+        -drive id=Installer,if=none,readonly=on,file="$INSTALLER_PATH"
+        -device ide-cd,bus=sata.3,drive=Installer
+    )
+fi
+
+echo
+echo "Launching macOS VM..."
+echo "OpenCore ISO: $OC_ISO"
+echo "Disk: $DISK_PATH"
+[ -n "$INSTALLER_PATH" ] && echo "Installer: $INSTALLER_PATH"
+echo
+
+"${QEMU_CMD[@]}"
+-----------------------------------------------------
+
+
+/home/VM/tinyvm/macos/scripts/launch-macos.sh
+
+
+nano /home/VM/.icewm/menu
+
+prog "macOS Launcher" exec /home/VM/tinyvm/macos/scripts/launch-macos.sh
+
+icewm --restart
+
+
+
