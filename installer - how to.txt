@@ -3,3 +3,6 @@ Installer-tiny-vm terminal
 
 chmod +x install-tinyvm-v2.sh
 ./install-tinyvm-v2.sh
+
+
+sed -i 's|CONFIG_FILE=.*|CONFIG_FILE="/home/VM/tinyvm/config/tinyvm.conf"|' /home/VM/tinyvm/bin/*.sh
