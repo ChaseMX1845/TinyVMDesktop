@@ -1,8 +1,15 @@
-Installer-tiny-vm terminal 
+Where to save:
+/home/VM/install-tinyvm-v2.1.sh
 
 
-chmod +x install-tinyvm-v2.sh
-./install-tinyvm-v2.sh
+Exact installation steps
+1) Open a terminal
+2) Create the installer file
+nano /home/VM/install-tinyvm-v2.1.sh
+
+sudo /home/VM/install-tinyvm-v2.1.sh
 
 
-sed -i 's|CONFIG_FILE=.*|CONFIG_FILE="/home/VM/tinyvm/config/tinyvm.conf"|' /home/VM/tinyvm/bin/*.sh
+chmod +x /home/VM/install-tinyvm-v2.1.sh
+
+tinyvm
