@@ -731,3 +731,55 @@ icewm --restart
 
 
 
+--------------------------------------
+
+#!/bin/bash
+
+set -e
+
+BASE="/home/VM/tinyvm/macos"
+INSTALLERS_DIR="$BASE/installers"
+LOCAL_BIN="$HOME/.local/bin"
+TARGET="$LOCAL_BIN/mkmaciso"
+MKMACISO_URL="https://raw.githubusercontent.com/LongQT-sea/mkmaciso/main/mkmaciso"
+
+mkdir -p "$INSTALLERS_DIR" "$LOCAL_BIN"
+
+echo "=================================="
+echo "Tiny VM Desktop - macOS ISO Builder"
+echo "=================================="
+echo
+
+if ! command -v curl >/dev/null 2>&1; then
+    echo "curl is not installed. Installing it now..."
+    sudo apt update
+    sudo apt install -y curl
+fi
+
+if [ ! -f "$TARGET" ]; then
+    echo "Downloading mkmaciso..."
+    curl -fsSL "$MKMACISO_URL" -o "$TARGET"
+    chmod +x "$TARGET"
+fi
+
+export PATH="$LOCAL_BIN:$PATH"
+
+echo
+echo "Installer output folder:"
+echo "  $INSTALLERS_DIR"
+echo
+echo "Changing into installers folder..."
+cd "$INSTALLERS_DIR"
+
+echo
+echo "Running mkmaciso..."
+echo
+
+"$TARGET"
+
+echo
+echo "Done."
+echo "Check for any created installer files in:"
+echo "  $INSTALLERS_DIR"
+
+
