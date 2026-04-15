@@ -1,75 +1,16 @@
-IFS='|' read -r ID TYPE MODE LABEL QUICKGET_OS QUICKGET_RELEASE DEFAULT_RAM DEFAULT_CPU DEFAULT_DISK NOTES <<< "$RECORD"
+rm -f /home/VM/tinyvm/bin/tinyvm-quick-wizard.sh
 
+nano /home/VM/tinyvm/bin/tinyvm-quick-wizard.sh
 
-
-readarray -t OS_LIST <<'EOF'
-# id|type|mode|label|quickget_os|quickget_release|ram|cpu|disk|notes
-
-# ---------------- WINDOWS ----------------
-1|windows|manual|Windows 95|||128|1|2|Legacy. Manual ISO required.
-2|windows|manual|Windows 98|||256|1|4|Legacy. Manual ISO required.
-3|windows|manual|Windows XP|||1024|1|20|Legacy. Manual ISO required.
-4|windows|manual|Windows 7|||2048|2|30|Manual ISO required.
-5|windows|manual|Windows 8|||4096|2|40|Manual ISO required.
-6|windows|auto|Windows 10|windows|10|4096|2|64|Auto download supported.
-7|windows|auto|Windows 11|windows|11|8192|4|96|Auto download supported.
-
-# ---------------- macOS ----------------
-8|macos|manual|macOS Lion|||2048|2|40|Legacy. Manual ISO required.
-9|macos|manual|macOS Mountain Lion|||2048|2|40|Manual ISO required.
-10|macos|manual|macOS Mavericks|||3072|2|50|Manual ISO required.
-11|macos|manual|macOS Yosemite|||3072|2|50|Manual ISO required.
-12|macos|manual|macOS El Capitan|||4096|2|50|Manual ISO required.
-13|macos|manual|macOS Sierra|||4096|2|50|Manual ISO required.
-14|macos|manual|macOS High Sierra|||4096|2|50|Manual ISO required.
-15|macos|auto|macOS Mojave|macos|mojave|4096|2|55|Auto download supported.
-16|macos|auto|macOS Catalina|macos|catalina|6144|4|64|Auto download supported.
-17|macos|auto|macOS Big Sur|macos|big-sur|8192|4|80|Auto download supported.
-18|macos|auto|macOS Monterey|macos|monterey|8192|4|90|Auto download supported.
-19|macos|auto|macOS Ventura|macos|ventura|8192|4|100|Auto download supported.
-20|macos|auto|macOS Sonoma|macos|sonoma|8192|4|110|Auto download supported.
-21|macos|auto|macOS Sequoia|macos|sequoia|8192|4|120|Auto download supported.
-22|macos|manual|macOS Tahoe|||8192|4|120|Experimental. Manual install required.
-
-# ---------------- LINUX ----------------
-23|linux|auto|Ubuntu 22.04|ubuntu|22.04|2048|2|25|Most popular Linux.
-24|linux|auto|Debian 12|debian|12|2048|2|20|Stable + lightweight.
-25|linux|auto|Lubuntu 22.04|lubuntu|22.04|1024|1|15|Very lightweight Ubuntu.
-26|linux|auto|Alpine Linux|alpine||512|1|5|Ultra minimal.
-27|linux|auto|Kali Linux|kali||4096|2|40|Security-focused distro.
-28|linux|auto|Arch Linux|archlinux||2048|2|20|Advanced users.
-EOF
-
-
-
-
-
-
-
-
-
-
-
-mkdir -p /home/VM/tinyvm/bin
-mkdir -p /home/VM/tinyvm/quickemu-vms
-mkdir -p /home/VM/tinyvm/isos
-
-
-
-WIZARD SCRIPT
-
-nano /home/VM/tinyvm/bin/tinyvm-wizard.sh
-
-SCRIPT -----------------------------------
+SCRIPT------------------------------------------
 #!/bin/bash
 
 set -e
 
 BASE="/home/VM/tinyvm"
 VM_DIR="$BASE/quickemu-vms"
-ISO_DIR="$BASE/isos"
 
-mkdir -p "$VM_DIR" "$ISO_DIR"
+mkdir -p "$VM_DIR"
 
 # ----------------------------
 # Host stats
@@ -80,7 +21,6 @@ TOTAL_RAM_GB=$((TOTAL_RAM_MB / 1024))
 
 CPU_THREADS=$(nproc --all)
 
-# Conservative recommended host-safe limits for a nested VM lab
 SAFE_RAM_MB=$((TOTAL_RAM_MB / 2))
 SAFE_RAM_GB=$((SAFE_RAM_MB / 1024))
 SAFE_CPU=$((CPU_THREADS / 2))
@@ -89,41 +29,33 @@ if [ "$SAFE_CPU" -lt 1 ]; then
 fi
 
 # ----------------------------
-# OS catalog
-# id|type|label|quickget_os|quickget_release|default_ram|default_cpu|default_disk|notes
+# Quickget-supported catalog
+# id|type|label|quickget_os|quickget_release|ram|cpu|disk|notes
 # ----------------------------
 readarray -t OS_LIST <<'EOF'
-1|windows|Windows 95|||128|1|2|Legacy. Experimental. Use existing ISO path manually.
-2|windows|Windows 98|||256|1|4|Legacy. Experimental. Use existing ISO path manually.
-3|windows|Windows XP|||1024|1|20|Legacy. Experimental. Use existing ISO path manually.
-4|windows|Windows 7|||2048|2|30|Use existing ISO path manually.
-5|windows|Windows 8|||4096|2|40|Use existing ISO path manually.
-6|windows|Windows 10|windows|10|4096|2|64|Recommended for modern Windows testing.
-7|windows|Windows 11|windows|11|8192|4|96|Needs stronger resources; may need install bypasses depending on image.
-8|macos|macOS Lion|||2048|2|40|Legacy macOS. Experimental.
-9|macos|macOS Mountain Lion|||2048|2|40|Legacy macOS. Experimental.
-10|macos|macOS Mavericks|||3072|2|50|Legacy macOS. Experimental.
-11|macos|macOS Yosemite|||3072|2|50|Legacy macOS. Experimental.
-12|macos|macOS El Capitan|||4096|2|50|Legacy macOS. Experimental.
-13|macos|macOS Sierra|||4096|2|50|Legacy macOS. Experimental.
-14|macos|macOS High Sierra|macos|high-sierra|4096|2|50|Good older macOS starting point.
-15|macos|macOS Mojave|macos|mojave|4096|2|55|Stable older macOS option.
-16|macos|macOS Catalina|macos|catalina|6144|4|64|Good macOS test target.
-17|macos|macOS Big Sur|macos|big-sur|8192|4|80|Modern macOS; heavier.
-18|macos|macOS Monterey|macos|monterey|8192|4|90|Modern macOS; good target.
-19|macos|macOS Ventura|macos|ventura|8192|4|100|Modern macOS; heavier.
-20|macos|macOS Sonoma|macos|sonoma|8192|4|110|Newer macOS; heavier.
-21|macos|macOS Sequoia|macos|sequoia|8192|4|120|Very new macOS; demanding.
-22|macos|macOS Tahoe|macos|tahoe|8192|4|120|Latest generation target; most demanding.
+1|windows|Windows 10|windows|10|4096|2|64|Good modern Windows baseline.
+2|windows|Windows 11|windows|11|8192|4|96|Heavier. Best on stronger systems.
+
+3|macos|macOS Mojave|macos|mojave|4096|2|55|Older supported macOS.
+4|macos|macOS Catalina|macos|catalina|6144|4|64|Great first macOS test target.
+5|macos|macOS Big Sur|macos|big-sur|8192|4|80|Modern macOS.
+6|macos|macOS Monterey|macos|monterey|8192|4|90|Modern macOS.
+7|macos|macOS Ventura|macos|ventura|8192|4|100|Heavier modern macOS.
+8|macos|macOS Sonoma|macos|sonoma|8192|4|110|Newer macOS.
+9|macos|macOS Sequoia|macos|sequoia|8192|4|120|Newest supported macOS in this wizard.
+
+10|linux|Ubuntu 22.04|ubuntu|22.04|2048|2|25|Popular general-purpose Linux.
+11|linux|Debian 12|debian|12|2048|2|20|Stable and lightweight.
+12|linux|Lubuntu 22.04|lubuntu|22.04|1024|1|15|Very lightweight Ubuntu.
+13|linux|Alpine Linux|alpine||512|1|5|Ultra minimal Linux.
+14|linux|Kali Linux|kali||4096|2|40|Security-focused distro.
+15|linux|Arch Linux|archlinux||2048|2|20|Advanced Linux users.
 EOF
 
-# ----------------------------
-# helpers
-# ----------------------------
 print_header() {
     clear
     echo "======================================="
-    echo "         Tiny VM Desktop Wizard"
+    echo "      Tiny VM Desktop - Quick Setup"
     echo "======================================="
     echo
     echo "Host stats:"
@@ -132,9 +64,8 @@ print_header() {
     echo "  Safer VM RAM cap:   ${SAFE_RAM_MB} MB (~${SAFE_RAM_GB} GB)"
     echo "  Safer VM CPU cap:   ${SAFE_CPU}"
     echo
-    echo "Tip:"
-    echo "  Because you are testing inside a VM, do NOT allocate the full host."
-    echo "  Staying at or below the safer caps is a better starting point."
+    echo "This wizard only shows OSes supported by quickget."
+    echo "It will auto-download / auto-prepare installer media."
     echo
 }
 
@@ -151,6 +82,14 @@ print_menu() {
     for line in "${OS_LIST[@]}"; do
         IFS='|' read -r id type label qgos qgrel dram dcpu ddisk notes <<< "$line"
         if [ "$type" = "macos" ]; then
+            printf "  %2s) %s\n" "$id" "$label"
+        fi
+    done
+    echo
+    echo "Linux:"
+    for line in "${OS_LIST[@]}"; do
+        IFS='|' read -r id type label qgos qgrel dram dcpu ddisk notes <<< "$line"
+        if [ "$type" = "linux" ]; then
             printf "  %2s) %s\n" "$id" "$label"
         fi
     done
@@ -173,9 +112,6 @@ sanitize_name() {
     echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g'
 }
 
-# ----------------------------
-# choose OS
-# ----------------------------
 print_header
 print_menu
 
@@ -232,97 +168,37 @@ VM_PATH="$VM_DIR/$VM_NAME"
 mkdir -p "$VM_PATH"
 CONF_FILE="$VM_PATH/$VM_NAME.conf"
 
-# ----------------------------
-# Build config
-# ----------------------------
-# Quickemu config style varies a bit by guest type/version.
-# This wizard uses a practical minimal config and adds user values.
-# For supported quickget guests, it can download first if the user wants.
-# For older/manual guests, the user points to an ISO path.
-# ----------------------------
+echo "Running quickget for $LABEL ..."
+cd "$VM_PATH"
 
-echo "Installer source options:"
-echo "  1) Download/prep automatically (if supported by quickget)"
-echo "  2) Use an existing ISO/image path manually"
-echo
-read -rp "Choose source [1]: " SRC_CHOICE
-SRC_CHOICE="${SRC_CHOICE:-1}"
-
-USE_MANUAL_ISO="no"
-INSTALLER_PATH=""
-
-if [ "$SRC_CHOICE" = "1" ]; then
-    if [ -n "$QUICKGET_OS" ] && [ -n "$QUICKGET_RELEASE" ]; then
-        echo
-        echo "Running quickget for $LABEL ..."
-        cd "$VM_PATH"
-        quickget "$QUICKGET_OS" "$QUICKGET_RELEASE"
-        GENERATED_CONF=$(find "$VM_PATH" -maxdepth 1 -name "*.conf" | head -n 1 || true)
-
-        if [ -z "$GENERATED_CONF" ]; then
-            echo "quickget did not generate a config file as expected."
-            exit 1
-        fi
-
-        # Merge/override with user-selected limits
-        cp "$GENERATED_CONF" "$CONF_FILE"
-
-        # Remove any existing values we want to control
-        sed -i '/^ram=/d' "$CONF_FILE" || true
-        sed -i '/^cpu_cores=/d' "$CONF_FILE" || true
-        sed -i '/^disk_size=/d' "$CONF_FILE" || true
-
-        {
-            echo "ram=\"${RAM_MB}\""
-            echo "cpu_cores=\"${CPU_CORES}\""
-            echo "disk_size=\"${DISK_GB}G\""
-        } >> "$CONF_FILE"
-
-    else
-        echo
-        echo "This OS does not have automatic quickget support in this wizard yet."
-        echo "Falling back to manual ISO/image mode."
-        USE_MANUAL_ISO="yes"
-    fi
+if [ -n "$QUICKGET_RELEASE" ]; then
+    quickget "$QUICKGET_OS" "$QUICKGET_RELEASE"
 else
-    USE_MANUAL_ISO="yes"
+    quickget "$QUICKGET_OS"
 fi
 
-if [ "$USE_MANUAL_ISO" = "yes" ]; then
+GENERATED_CONF=$(find "$VM_PATH" -maxdepth 1 -name "*.conf" | head -n 1 || true)
+
+if [ -z "$GENERATED_CONF" ] || [ ! -f "$GENERATED_CONF" ]; then
     echo
-    echo "Enter the full path to your ISO/image."
-    echo "Examples:"
-    echo "  $ISO_DIR"
-    echo "  /home/VM/Downloads"
-    echo
-    read -rp "Installer ISO/image path: " INSTALLER_PATH
-
-    if [ ! -f "$INSTALLER_PATH" ]; then
-        echo "File not found: $INSTALLER_PATH"
-        exit 1
-    fi
-
-    # Manual quickemu config
-    # This is intentionally simple and conservative.
-    cat > "$CONF_FILE" <<EOF2
-guest_os="${TYPE}"
-disk_img="${VM_NAME}.qcow2"
-disk_size="${DISK_GB}G"
-ram="${RAM_MB}"
-cpu_cores="${CPU_CORES}"
-iso="${INSTALLER_PATH}"
-EOF2
-
-    # Add a more specific guest hint where useful
-    case "$TYPE" in
-        windows)
-            echo "boot=\"legacy\"" >> "$CONF_FILE"
-            ;;
-        macos)
-            echo "guest_os=\"macos\"" >> "$CONF_FILE"
-            ;;
-    esac
+    echo "quickget did not create a config file as expected."
+    exit 1
 fi
+
+echo "quickget created config: $GENERATED_CONF"
+
+cp "$GENERATED_CONF" "$CONF_FILE"
+
+# Override user-selected values
+sed -i '/^ram=/d' "$CONF_FILE" || true
+sed -i '/^cpu_cores=/d' "$CONF_FILE" || true
+sed -i '/^disk_size=/d' "$CONF_FILE" || true
+
+{
+    echo "ram=\"${RAM_MB}\""
+    echo "cpu_cores=\"${CPU_CORES}\""
+    echo "disk_size=\"${DISK_GB}G\""
+} >> "$CONF_FILE"
 
 echo
 echo "Config created:"
@@ -341,22 +217,17 @@ else
     echo "  cd \"$VM_PATH\" && quickemu --vm \"$CONF_FILE\""
 fi
 
-SCRIPT END --------------------------------------
+SCRIPT END --------------------------------------------------
 
-chmod +x /home/VM/tinyvm/bin/tinyvm-wizard.sh
+chmod +x /home/VM/tinyvm/bin/tinyvm-quick-wizard.sh
 
-sudo apt update
-sudo apt install bash coreutils curl wget qemu-system-x86 qemu-utils ovmf
+/home/VM/tinyvm/bin/tinyvm-quick-wizard.sh
 
-TEST
-quickemu --version
-quickget --help
 
-RUN - /home/VM/tinyvm/bin/tinyvm-wizard.sh
 
-nano /home/VM/.icewm/menu
+ICEWM ENTRY
 
-prog "Tiny VM Wizard" exec lxterminal -e bash -lc '/home/VM/tinyvm/bin/tinyvm-wizard.sh; echo; echo "Press Enter to close..."; read'
+prog "Tiny VM Quick Setup" exec lxterminal -e bash -lc '/home/VM/tinyvm/bin/tinyvm-quick-wizard.sh; echo; echo "Press Enter to close..."; read'
 
 icewm --restart
 
