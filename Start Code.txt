@@ -1,3 +1,51 @@
+readarray -t OS_LIST <<'EOF'
+# id|type|mode|label|quickget_os|quickget_release|ram|cpu|disk|notes
+
+# ---------------- WINDOWS ----------------
+1|windows|manual|Windows 95|||128|1|2|Legacy. Manual ISO required.
+2|windows|manual|Windows 98|||256|1|4|Legacy. Manual ISO required.
+3|windows|manual|Windows XP|||1024|1|20|Legacy. Manual ISO required.
+4|windows|manual|Windows 7|||2048|2|30|Manual ISO required.
+5|windows|manual|Windows 8|||4096|2|40|Manual ISO required.
+6|windows|auto|Windows 10|windows|10|4096|2|64|Auto download supported.
+7|windows|auto|Windows 11|windows|11|8192|4|96|Auto download supported.
+
+# ---------------- macOS ----------------
+8|macos|manual|macOS Lion|||2048|2|40|Legacy. Manual ISO required.
+9|macos|manual|macOS Mountain Lion|||2048|2|40|Manual ISO required.
+10|macos|manual|macOS Mavericks|||3072|2|50|Manual ISO required.
+11|macos|manual|macOS Yosemite|||3072|2|50|Manual ISO required.
+12|macos|manual|macOS El Capitan|||4096|2|50|Manual ISO required.
+13|macos|manual|macOS Sierra|||4096|2|50|Manual ISO required.
+14|macos|manual|macOS High Sierra|||4096|2|50|Manual ISO required.
+15|macos|auto|macOS Mojave|macos|mojave|4096|2|55|Auto download supported.
+16|macos|auto|macOS Catalina|macos|catalina|6144|4|64|Auto download supported.
+17|macos|auto|macOS Big Sur|macos|big-sur|8192|4|80|Auto download supported.
+18|macos|auto|macOS Monterey|macos|monterey|8192|4|90|Auto download supported.
+19|macos|auto|macOS Ventura|macos|ventura|8192|4|100|Auto download supported.
+20|macos|auto|macOS Sonoma|macos|sonoma|8192|4|110|Auto download supported.
+21|macos|auto|macOS Sequoia|macos|sequoia|8192|4|120|Auto download supported.
+22|macos|manual|macOS Tahoe|||8192|4|120|Experimental. Manual install required.
+
+# ---------------- LINUX ----------------
+23|linux|auto|Ubuntu 22.04|ubuntu|22.04|2048|2|25|Most popular Linux.
+24|linux|auto|Debian 12|debian|12|2048|2|20|Stable + lightweight.
+25|linux|auto|Lubuntu 22.04|lubuntu|22.04|1024|1|15|Very lightweight Ubuntu.
+26|linux|auto|Alpine Linux|alpine||512|1|5|Ultra minimal.
+27|linux|auto|Kali Linux|kali||4096|2|40|Security-focused distro.
+28|linux|auto|Arch Linux|archlinux||2048|2|20|Advanced users.
+EOF
+
+
+
+
+
+
+
+
+
+
+
 mkdir -p /home/VM/tinyvm/bin
 mkdir -p /home/VM/tinyvm/quickemu-vms
 mkdir -p /home/VM/tinyvm/isos
