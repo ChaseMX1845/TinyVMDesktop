@@ -4,8 +4,6 @@ nano /home/VM/tinyvm/config/tinyvm.conf
 --------------------------------------------------------
 #!/usr/bin/env bash
 
-# Tiny VM Desktop shared config
-
 TINYVM_ROOT="/home/VM/tinyvm"
 VM_ROOT="${TINYVM_ROOT}/vms"
 CACHE_DIR="${TINYVM_ROOT}/cache"
@@ -14,18 +12,18 @@ CONFIG_DIR="${TINYVM_ROOT}/config"
 
 VM_INDEX_FILE="${CACHE_DIR}/vm-index.txt"
 
-# Default display mode for launching VMs
-# Recommended on antiX / lightweight hosts:
+# Safe default launch backend
 DISPLAY_MODE="sdl"
 
-# Editor for config files
+# Safe default window size
+DEFAULT_WIDTH="1280"
+DEFAULT_HEIGHT="800"
+
 EDITOR_CMD="${EDITOR:-nano}"
 
-# Quickemu / Quickget binaries
 QUICKEMU_BIN="${QUICKEMU_BIN:-quickemu}"
 QUICKGET_BIN="${QUICKGET_BIN:-quickget}"
 
-# Optional: set to 1 for more console output
 DEBUG="${DEBUG:-0}"
 --------------------------------------------------------
 
@@ -242,11 +240,6 @@ list_vms() {
   done < "$VM_INDEX_FILE"
 }
 
-select_vm_line() {
-  local selection="$1"
-  sed -n "${selection}p" "$VM_INDEX_FILE"
-}
-
 main() {
   if ! command -v "$QUICKEMU_BIN" >/dev/null 2>&1; then
     echo "ERROR: quickemu not found in PATH."
@@ -272,7 +265,7 @@ main() {
     exit 1
   fi
 
-  line="$(select_vm_line "$selection")"
+  line="$(sed -n "${selection}p" "$VM_INDEX_FILE")"
   if [[ -z "$line" ]]; then
     echo "No VM matches that selection."
     exit 1
@@ -284,9 +277,14 @@ main() {
   echo "Launching: $vm_name"
   echo "Config:    $conf_path"
   echo "Display:   $DISPLAY_MODE"
+  echo "Window:    ${DEFAULT_WIDTH}x${DEFAULT_HEIGHT}"
   echo
 
-  exec "$QUICKEMU_BIN" --vm "$conf_path" --display "$DISPLAY_MODE"
+  exec "$QUICKEMU_BIN" \
+    --vm "$conf_path" \
+    --display "$DISPLAY_MODE" \
+    --width "$DEFAULT_WIDTH" \
+    --height "$DEFAULT_HEIGHT"
 }
 
 main "$@"
@@ -820,6 +818,204 @@ RUN IN TERMINAL:
 tinyvm
 or
 /home/VM/tinyvm/bin/tinyvm-manager.sh
+
+
+
+tinyvm-quick-wizard.sh
+
+#!/usr/bin/env bash
+set -euo pipefail
+
+CONFIG_FILE="/home/VM/tinyvm/config/tinyvm.conf"
+# shellcheck source=/dev/null
+source "$CONFIG_FILE"
+
+require_bin() {
+  local bin="$1"
+  if ! command -v "$bin" >/dev/null 2>&1; then
+    echo "ERROR: Required command not found: $bin"
+    exit 1
+  fi
+}
+
+slugify() {
+  printf '%s' "$1" \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed 's/[^a-z0-9._-]/-/g; s/--*/-/g; s/^-//; s/-$//'
+}
+
+set_or_add_conf_value() {
+  local key="$1"
+  local value="$2"
+  local file="$3"
+
+  if grep -qE "^${key}=" "$file"; then
+    sed -i "s|^${key}=.*|${key}=\"${value}\"|" "$file"
+  else
+    printf '%s="%s"\n' "$key" "$value" >> "$file"
+  fi
+}
+
+pick_preset() {
+  cat <<'EOF'
+1) Windows 10
+2) Windows 11
+3) macOS Mojave
+4) macOS Catalina
+5) macOS Big Sur
+6) macOS Monterey
+7) macOS Ventura
+8) macOS Sonoma
+9) macOS Sequoia
+10) Ubuntu
+11) Debian
+12) Lubuntu
+13) Alpine
+14) Kali
+15) Arch
+16) Custom quickget arguments
+EOF
+}
+
+resolve_quickget_args() {
+  local choice="$1"
+  case "$choice" in
+    1)  echo "windows 10" ;;
+    2)  echo "windows 11" ;;
+    3)  echo "macos mojave" ;;
+    4)  echo "macos catalina" ;;
+    5)  echo "macos big-sur" ;;
+    6)  echo "macos monterey" ;;
+    7)  echo "macos ventura" ;;
+    8)  echo "macos sonoma" ;;
+    9)  echo "macos sequoia" ;;
+    10) echo "ubuntu" ;;
+    11) echo "debian" ;;
+    12) echo "lubuntu" ;;
+    13) echo "alpine" ;;
+    14) echo "kali" ;;
+    15) echo "arch" ;;
+    16) return 1 ;;
+    *) return 2 ;;
+  esac
+}
+
+is_macos_args() {
+  local args="$1"
+  [[ "$args" == macos* ]]
+}
+
+main() {
+  require_bin "$QUICKGET_BIN"
+
+  mkdir -p "$VM_ROOT"
+
+  echo
+  echo "Tiny VM Desktop - Quick Wizard"
+  echo "=============================="
+  echo
+  pick_preset
+  echo
+
+  read -rp "Choose OS preset: " preset_choice
+
+  quickget_args=""
+  if quickget_args="$(resolve_quickget_args "$preset_choice")"; then
+    :
+  else
+    status=$?
+    if [[ $status -eq 1 ]]; then
+      read -rp "Enter custom quickget arguments (example: windows 10): " quickget_args
+    else
+      echo "Invalid selection."
+      exit 1
+    fi
+  fi
+
+  read -rp "Enter VM name: " vm_name
+  vm_name="$(slugify "$vm_name")"
+
+  if [[ -z "$vm_name" ]]; then
+    echo "VM name cannot be empty."
+    exit 1
+  fi
+
+  read -rp "RAM in MB (example 4096): " ram
+  read -rp "CPU cores (example 4): " cpu
+  read -rp "Disk size in GB (example 64): " disk
+
+  [[ -z "$ram" ]] && ram="4096"
+  [[ -z "$cpu" ]] && cpu="2"
+  [[ -z "$disk" ]] && disk="64"
+
+  vm_dir="${VM_ROOT}/${vm_name}"
+
+  if [[ -e "$vm_dir" ]]; then
+    echo "ERROR: VM directory already exists: $vm_dir"
+    exit 1
+  fi
+
+  mkdir -p "$vm_dir"
+  cd "$vm_dir"
+
+  echo
+  echo "Running: $QUICKGET_BIN $quickget_args"
+  echo "Target:  $vm_dir"
+  echo
+
+  # shellcheck disable=SC2086
+  "$QUICKGET_BIN" $quickget_args
+
+  conf_file="$(find "$vm_dir" -maxdepth 1 -type f -name "*.conf" | head -n1 || true)"
+
+  if [[ -z "$conf_file" ]]; then
+    echo "ERROR: quickget did not produce a .conf file in $vm_dir"
+    exit 1
+  fi
+
+  desired_conf="${vm_dir}/${vm_name}.conf"
+
+  if [[ "$(basename "$conf_file")" != "${vm_name}.conf" ]]; then
+    mv "$conf_file" "$desired_conf"
+    conf_file="$desired_conf"
+  fi
+
+  disk_file="$(find "$vm_dir" -maxdepth 1 -type f -name "*.qcow2" | head -n1 || true)"
+  if [[ -n "$disk_file" && "$(basename "$disk_file")" != "${vm_name}.qcow2" ]]; then
+    mv "$disk_file" "${vm_dir}/${vm_name}.qcow2"
+  fi
+
+  set_or_add_conf_value "ram" "$ram" "$conf_file"
+  set_or_add_conf_value "cpu_cores" "$cpu" "$conf_file"
+  set_or_add_conf_value "width" "$DEFAULT_WIDTH" "$conf_file"
+  set_or_add_conf_value "height" "$DEFAULT_HEIGHT" "$conf_file"
+
+  if is_macos_args "$quickget_args"; then
+    set_or_add_conf_value "guest_os" "macos" "$conf_file"
+  fi
+
+  {
+    echo
+    echo "# Tiny VM Desktop requested disk size: ${disk}G"
+    echo "# Tiny VM Desktop launch profile:"
+    echo "# display=${DISPLAY_MODE}"
+    echo "# width=${DEFAULT_WIDTH}"
+    echo "# height=${DEFAULT_HEIGHT}"
+  } >> "$conf_file"
+
+  echo
+  echo "VM created."
+  echo "Config: $conf_file"
+  echo "RAM:    $ram MB"
+  echo "CPU:    $cpu"
+  echo "Disk:   requested ${disk}G"
+  echo "Window: ${DEFAULT_WIDTH}x${DEFAULT_HEIGHT}"
+  echo
+
+  "${BIN_DIR}/tinyvm-scan-vms.sh" >/dev/null
+}
+
+main "$@"
 
 
 
