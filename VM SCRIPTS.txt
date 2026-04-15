@@ -707,5 +707,27 @@ then: /home/VM/tinyvm/macos/scripts/launch-macos.sh
 
 
 
+----------------------------------------------------------------------------------------
+
+sudo apt install dos2unix
+dos2unix /home/VM/tinyvm/macos/scripts/build-macos-iso.sh
+dos2unix /home/VM/tinyvm/macos/scripts/launch-macos.sh
+
+nano /home/VM/.icewm/menu
+
+SCRIPT:
+menu "Applications" folder {
+prog "Terminal" exec lxterminal
+prog "File Manager" exec pcmanfm
+prog "Web Browser" exec falkon
+prog "Virtual Machines" exec virt-manager
+prog "Tiny VM Desktop" exec lxterminal -e /home/VM/tinyvm/bin/tinyvm-menu.sh
+prog "macOS ISO Builder" exec lxterminal -e /home/VM/tinyvm/macos/scripts/build-macos-iso.sh
+prog "macOS Launcher" exec lxterminal -e /home/VM/tinyvm/macos/scripts/launch-macos.sh
+}
+
+
+icewm --restart
+
 
 
