@@ -1,233 +1,830 @@
-rm -f /home/VM/tinyvm/bin/tinyvm-quick-wizard.sh
+mkdir -p /home/VM/tinyvm/{bin,vms,cache,config}
+
+nano /home/VM/tinyvm/config/tinyvm.conf
+--------------------------------------------------------
+#!/usr/bin/env bash
+
+# Tiny VM Desktop shared config
+
+TINYVM_ROOT="/home/VM/tinyvm"
+VM_ROOT="${TINYVM_ROOT}/vms"
+CACHE_DIR="${TINYVM_ROOT}/cache"
+BIN_DIR="${TINYVM_ROOT}/bin"
+CONFIG_DIR="${TINYVM_ROOT}/config"
+
+VM_INDEX_FILE="${CACHE_DIR}/vm-index.txt"
+
+# Default display mode for launching VMs
+# Recommended on antiX / lightweight hosts:
+DISPLAY_MODE="sdl"
+
+# Editor for config files
+EDITOR_CMD="${EDITOR:-nano}"
+
+# Quickemu / Quickget binaries
+QUICKEMU_BIN="${QUICKEMU_BIN:-quickemu}"
+QUICKGET_BIN="${QUICKGET_BIN:-quickget}"
+
+# Optional: set to 1 for more console output
+DEBUG="${DEBUG:-0}"
+--------------------------------------------------------
+
+nano /home/VM/tinyvm/bin/tinyvm-scan-vms.sh
+
+---------------------------------------------------------
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONFIG_FILE="/home/VM/tinyvm/config/tinyvm.conf"
+
+if [[ -f "$CONFIG_FILE" ]]; then
+  # shellcheck source=/dev/null
+  source "$CONFIG_FILE"
+else
+  echo "ERROR: Missing config file: $CONFIG_FILE" >&2
+  exit 1
+fi
+
+mkdir -p "$CACHE_DIR"
+
+extract_value() {
+  local key="$1"
+  local file="$2"
+  local value
+  value="$(grep -E "^${key}=" "$file" 2>/dev/null | head -n1 | cut -d'=' -f2- || true)"
+  value="${value%\"}"
+  value="${value#\"}"
+  printf '%s' "$value"
+}
+
+detect_disk_file() {
+  local dir="$1"
+  local disk
+  disk="$(find "$dir" -maxdepth 1 -type f \( -name "*.qcow2" -o -name "*.img" -o -name "*.raw" -o -name "*.vmdk" \) | head -n1 || true)"
+  printf '%s' "$disk"
+}
+
+detect_os_type() {
+  local conf="$1"
+  local dir="$2"
+  local os="unknown"
+
+  local guest_os
+  guest_os="$(extract_value "guest_os" "$conf")"
+
+  if [[ -n "$guest_os" ]]; then
+    os="$guest_os"
+  else
+    local name lower
+    name="$(basename "$conf" .conf)"
+    lower="$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')"
+
+    if [[ "$lower" == *windows* ]]; then
+      os="windows"
+    elif [[ "$lower" == *macos* ]] || [[ "$lower" == *osx* ]] || [[ "$lower" == *ventura* ]] || [[ "$lower" == *sonoma* ]] || [[ "$lower" == *sequoia* ]] || [[ "$lower" == *monterey* ]] || [[ "$lower" == *big-sur* ]] || [[ "$lower" == *catalina* ]] || [[ "$lower" == *mojave* ]]; then
+      os="macos"
+    elif [[ "$lower" == *ubuntu* ]] || [[ "$lower" == *debian* ]] || [[ "$lower" == *arch* ]] || [[ "$lower" == *alpine* ]] || [[ "$lower" == *kali* ]] || [[ "$lower" == *lubuntu* ]]; then
+      os="linux"
+    fi
+  fi
+
+  printf '%s' "$os"
+}
+
+main() {
+  : > "$VM_INDEX_FILE"
+
+  while IFS= read -r -d '' conf; do
+    vm_dir="$(dirname "$conf")"
+    vm_name="$(basename "$conf" .conf)"
+    os_type="$(detect_os_type "$conf" "$vm_dir")"
+    ram="$(extract_value "ram" "$conf")"
+    cpu="$(extract_value "cpu_cores" "$conf")"
+    disk="$(detect_disk_file "$vm_dir")"
+
+    [[ -z "$ram" ]] && ram="unknown"
+    [[ -z "$cpu" ]] && cpu="unknown"
+    [[ -z "$disk" ]] && disk="none"
+
+    printf '%s|%s|%s|%s|%s|%s\n' \
+      "$vm_name" \
+      "$os_type" \
+      "$ram" \
+      "$cpu" \
+      "$disk" \
+      "$conf" >> "$VM_INDEX_FILE"
+
+  done < <(find "$VM_ROOT" -type f -name "*.conf" -print0 | sort -z)
+
+  count="$(wc -l < "$VM_INDEX_FILE" 2>/dev/null || echo 0)"
+  echo "Scan complete. Found ${count} VM(s)."
+  echo "Index written to: $VM_INDEX_FILE"
+}
+
+main "$@"
+-----------------------------------------------------
+
+chmod +x /home/VM/tinyvm/bin/tinyvm-scan-vms.sh
+
+nano /home/VM/tinyvm/bin/tinyvm-delete-vm.sh
+----------------------------------------------------
+#!/usr/bin/env bash
+set -euo pipefail
+
+CONFIG_FILE="/home/VM/tinyvm/config/tinyvm.conf"
+# shellcheck source=/dev/null
+source "$CONFIG_FILE"
+
+scan_if_needed() {
+  if [[ ! -f "$VM_INDEX_FILE" ]]; then
+    "${BIN_DIR}/tinyvm-scan-vms.sh"
+  fi
+}
+
+list_vms() {
+  local i=1
+  while IFS='|' read -r vm_name os_type ram cpu disk conf_path; do
+    [[ -z "$vm_name" ]] && continue
+    printf '%2d) %-24s | OS: %-10s | RAM: %-8s | CPU: %-4s\n' "$i" "$vm_name" "$os_type" "$ram" "$cpu"
+    i=$((i + 1))
+  done < "$VM_INDEX_FILE"
+}
+
+select_vm_line() {
+  local selection="$1"
+  sed -n "${selection}p" "$VM_INDEX_FILE"
+}
+
+main() {
+  scan_if_needed
+
+  if [[ ! -s "$VM_INDEX_FILE" ]]; then
+    echo "No VMs found."
+    exit 0
+  fi
+
+  echo
+  echo "Available VMs:"
+  list_vms
+  echo
+
+  read -rp "Enter VM number to delete: " selection
+
+  if ! [[ "$selection" =~ ^[0-9]+$ ]]; then
+    echo "Invalid selection."
+    exit 1
+  fi
+
+  line="$(select_vm_line "$selection")"
+  if [[ -z "$line" ]]; then
+    echo "No VM matches that selection."
+    exit 1
+  fi
+
+  IFS='|' read -r vm_name os_type ram cpu disk conf_path <<< "$line"
+  vm_dir="$(dirname "$conf_path")"
+
+  echo
+  echo "You are about to DELETE this VM permanently:"
+  echo "Name: $vm_name"
+  echo "OS:   $os_type"
+  echo "Path: $vm_dir"
+  echo
+  echo "This will remove the whole VM folder including:"
+  echo "- config"
+  echo "- qcow2 / disk files"
+  echo "- ISO / recovery files"
+  echo
+
+  read -rp "Type DELETE to confirm: " confirm
+
+  if [[ "$confirm" != "DELETE" ]]; then
+    echo "Cancelled."
+    exit 0
+  fi
+
+  rm -rf -- "$vm_dir"
+
+  echo "Deleted: $vm_dir"
+  "${BIN_DIR}/tinyvm-scan-vms.sh" >/dev/null
+  echo "VM index refreshed."
+}
+
+main "$@"
+
+---------------------------------------------------
+
+chmod +x /home/VM/tinyvm/bin/tinyvm-delete-vm.sh
+
+nano /home/VM/tinyvm/bin/tinyvm-launch-existing.sh
+---------------------------------------------------
+
+#!/usr/bin/env bash
+set -euo pipefail
+
+CONFIG_FILE="/home/VM/tinyvm/config/tinyvm.conf"
+# shellcheck source=/dev/null
+source "$CONFIG_FILE"
+
+scan_if_needed() {
+  if [[ ! -f "$VM_INDEX_FILE" ]]; then
+    "${BIN_DIR}/tinyvm-scan-vms.sh"
+  fi
+}
+
+list_vms() {
+  local i=1
+  while IFS='|' read -r vm_name os_type ram cpu disk conf_path; do
+    [[ -z "$vm_name" ]] && continue
+    printf '%2d) %-24s | OS: %-10s | RAM: %-8s | CPU: %-4s\n' "$i" "$vm_name" "$os_type" "$ram" "$cpu"
+    i=$((i + 1))
+  done < "$VM_INDEX_FILE"
+}
+
+select_vm_line() {
+  local selection="$1"
+  sed -n "${selection}p" "$VM_INDEX_FILE"
+}
+
+main() {
+  if ! command -v "$QUICKEMU_BIN" >/dev/null 2>&1; then
+    echo "ERROR: quickemu not found in PATH."
+    exit 1
+  fi
+
+  scan_if_needed
+
+  if [[ ! -s "$VM_INDEX_FILE" ]]; then
+    echo "No VMs found."
+    exit 0
+  fi
+
+  echo
+  echo "Available VMs:"
+  list_vms
+  echo
+
+  read -rp "Enter VM number to launch: " selection
+
+  if ! [[ "$selection" =~ ^[0-9]+$ ]]; then
+    echo "Invalid selection."
+    exit 1
+  fi
+
+  line="$(select_vm_line "$selection")"
+  if [[ -z "$line" ]]; then
+    echo "No VM matches that selection."
+    exit 1
+  fi
+
+  IFS='|' read -r vm_name os_type ram cpu disk conf_path <<< "$line"
+
+  echo
+  echo "Launching: $vm_name"
+  echo "Config:    $conf_path"
+  echo "Display:   $DISPLAY_MODE"
+  echo
+
+  exec "$QUICKEMU_BIN" --vm "$conf_path" --display "$DISPLAY_MODE"
+}
+
+main "$@"
+
+-----------------------------------------
+
+chmod +x /home/VM/tinyvm/bin/tinyvm-launch-existing.sh
+
+nano /home/VM/tinyvm/bin/tinyvm-edit-vm.sh
+
+-----------------------------------------
+#!/usr/bin/env bash
+set -euo pipefail
+
+CONFIG_FILE="/home/VM/tinyvm/config/tinyvm.conf"
+# shellcheck source=/dev/null
+source "$CONFIG_FILE"
+
+scan_if_needed() {
+  if [[ ! -f "$VM_INDEX_FILE" ]]; then
+    "${BIN_DIR}/tinyvm-scan-vms.sh"
+  fi
+}
+
+list_vms() {
+  local i=1
+  while IFS='|' read -r vm_name os_type ram cpu disk conf_path; do
+    [[ -z "$vm_name" ]] && continue
+    printf '%2d) %-24s | OS: %-10s | RAM: %-8s | CPU: %-4s\n' "$i" "$vm_name" "$os_type" "$ram" "$cpu"
+    i=$((i + 1))
+  done < "$VM_INDEX_FILE"
+}
+
+select_vm_line() {
+  local selection="$1"
+  sed -n "${selection}p" "$VM_INDEX_FILE"
+}
+
+main() {
+  scan_if_needed
+
+  if [[ ! -s "$VM_INDEX_FILE" ]]; then
+    echo "No VMs found."
+    exit 0
+  fi
+
+  echo
+  echo "Available VMs:"
+  list_vms
+  echo
+
+  read -rp "Enter VM number to edit: " selection
+
+  if ! [[ "$selection" =~ ^[0-9]+$ ]]; then
+    echo "Invalid selection."
+    exit 1
+  fi
+
+  line="$(select_vm_line "$selection")"
+  if [[ -z "$line" ]]; then
+    echo "No VM matches that selection."
+    exit 1
+  fi
+
+  IFS='|' read -r vm_name os_type ram cpu disk conf_path <<< "$line"
+
+  echo
+  echo "Editing: $conf_path"
+  echo
+  echo "Common values:"
+  echo '  ram="8192"'
+  echo '  cpu_cores="4"'
+  echo
+  echo "Note: changing config does NOT resize the disk image."
+  echo "To resize a qcow2 disk later:"
+  echo "  qemu-img resize <diskfile>.qcow2 +20G"
+  echo
+
+  "$EDITOR_CMD" "$conf_path"
+
+  "${BIN_DIR}/tinyvm-scan-vms.sh" >/dev/null
+}
+
+main "$@"
+---------------------------------------------------
+
+chmod +x /home/VM/tinyvm/bin/tinyvm-edit-vm.sh
 
 nano /home/VM/tinyvm/bin/tinyvm-quick-wizard.sh
+---------------------------------------------------
+#!/usr/bin/env bash
+set -euo pipefail
 
-SCRIPT------------------------------------------
-#!/bin/bash
+CONFIG_FILE="/home/VM/tinyvm/config/tinyvm.conf"
+# shellcheck source=/dev/null
+source "$CONFIG_FILE"
 
-set -e
+require_bin() {
+  local bin="$1"
+  if ! command -v "$bin" >/dev/null 2>&1; then
+    echo "ERROR: Required command not found: $bin"
+    exit 1
+  fi
+}
 
-BASE="/home/VM/tinyvm"
-VM_DIR="$BASE/quickemu-vms"
+slugify() {
+  printf '%s' "$1" \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed 's/[^a-z0-9._-]/-/g; s/--*/-/g; s/^-//; s/-$//'
+}
 
-mkdir -p "$VM_DIR"
+set_or_add_conf_value() {
+  local key="$1"
+  local value="$2"
+  local file="$3"
 
-# ----------------------------
-# Host stats
-# ----------------------------
-TOTAL_RAM_KB=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
-TOTAL_RAM_MB=$((TOTAL_RAM_KB / 1024))
-TOTAL_RAM_GB=$((TOTAL_RAM_MB / 1024))
+  if grep -qE "^${key}=" "$file"; then
+    sed -i "s|^${key}=.*|${key}=\"${value}\"|" "$file"
+  else
+    printf '%s="%s"\n' "$key" "$value" >> "$file"
+  fi
+}
 
-CPU_THREADS=$(nproc --all)
-
-SAFE_RAM_MB=$((TOTAL_RAM_MB / 2))
-SAFE_RAM_GB=$((SAFE_RAM_MB / 1024))
-SAFE_CPU=$((CPU_THREADS / 2))
-if [ "$SAFE_CPU" -lt 1 ]; then
-    SAFE_CPU=1
-fi
-
-# ----------------------------
-# Quickget-supported catalog
-# id|type|label|quickget_os|quickget_release|ram|cpu|disk|notes
-# ----------------------------
-readarray -t OS_LIST <<'EOF'
-1|windows|Windows 10|windows|10|4096|2|64|Good modern Windows baseline.
-2|windows|Windows 11|windows|11|8192|4|96|Heavier. Best on stronger systems.
-
-3|macos|macOS Mojave|macos|mojave|4096|2|55|Older supported macOS.
-4|macos|macOS Catalina|macos|catalina|6144|4|64|Great first macOS test target.
-5|macos|macOS Big Sur|macos|big-sur|8192|4|80|Modern macOS.
-6|macos|macOS Monterey|macos|monterey|8192|4|90|Modern macOS.
-7|macos|macOS Ventura|macos|ventura|8192|4|100|Heavier modern macOS.
-8|macos|macOS Sonoma|macos|sonoma|8192|4|110|Newer macOS.
-9|macos|macOS Sequoia|macos|sequoia|8192|4|120|Newest supported macOS in this wizard.
-
-10|linux|Ubuntu 22.04|ubuntu|22.04|2048|2|25|Popular general-purpose Linux.
-11|linux|Debian 12|debian|12|2048|2|20|Stable and lightweight.
-12|linux|Lubuntu 22.04|lubuntu|22.04|1024|1|15|Very lightweight Ubuntu.
-13|linux|Alpine Linux|alpine||512|1|5|Ultra minimal Linux.
-14|linux|Kali Linux|kali||4096|2|40|Security-focused distro.
-15|linux|Arch Linux|archlinux||2048|2|20|Advanced Linux users.
+pick_preset() {
+  cat <<'EOF'
+1) Windows 10
+2) Windows 11
+3) macOS Mojave
+4) macOS Catalina
+5) macOS Big Sur
+6) macOS Monterey
+7) macOS Ventura
+8) macOS Sonoma
+9) macOS Sequoia
+10) Ubuntu
+11) Debian
+12) Lubuntu
+13) Alpine
+14) Kali
+15) Arch
+16) Custom quickget arguments
 EOF
-
-print_header() {
-    clear
-    echo "======================================="
-    echo "      Tiny VM Desktop - Quick Setup"
-    echo "======================================="
-    echo
-    echo "Host stats:"
-    echo "  Total RAM:          ${TOTAL_RAM_MB} MB (~${TOTAL_RAM_GB} GB)"
-    echo "  CPU threads:        ${CPU_THREADS}"
-    echo "  Safer VM RAM cap:   ${SAFE_RAM_MB} MB (~${SAFE_RAM_GB} GB)"
-    echo "  Safer VM CPU cap:   ${SAFE_CPU}"
-    echo
-    echo "This wizard only shows OSes supported by quickget."
-    echo "It will auto-download / auto-prepare installer media."
-    echo
 }
 
-print_menu() {
-    echo "Windows:"
-    for line in "${OS_LIST[@]}"; do
-        IFS='|' read -r id type label qgos qgrel dram dcpu ddisk notes <<< "$line"
-        if [ "$type" = "windows" ]; then
-            printf "  %2s) %s\n" "$id" "$label"
-        fi
-    done
-    echo
-    echo "macOS:"
-    for line in "${OS_LIST[@]}"; do
-        IFS='|' read -r id type label qgos qgrel dram dcpu ddisk notes <<< "$line"
-        if [ "$type" = "macos" ]; then
-            printf "  %2s) %s\n" "$id" "$label"
-        fi
-    done
-    echo
-    echo "Linux:"
-    for line in "${OS_LIST[@]}"; do
-        IFS='|' read -r id type label qgos qgrel dram dcpu ddisk notes <<< "$line"
-        if [ "$type" = "linux" ]; then
-            printf "  %2s) %s\n" "$id" "$label"
-        fi
-    done
-    echo
+resolve_quickget_args() {
+  local choice="$1"
+  case "$choice" in
+    1)  echo "windows 10" ;;
+    2)  echo "windows 11" ;;
+    3)  echo "macos mojave" ;;
+    4)  echo "macos catalina" ;;
+    5)  echo "macos big-sur" ;;
+    6)  echo "macos monterey" ;;
+    7)  echo "macos ventura" ;;
+    8)  echo "macos sonoma" ;;
+    9)  echo "macos sequoia" ;;
+    10) echo "ubuntu" ;;
+    11) echo "debian" ;;
+    12) echo "lubuntu" ;;
+    13) echo "alpine" ;;
+    14) echo "kali" ;;
+    15) echo "arch" ;;
+    16) return 1 ;;
+    *) return 2 ;;
+  esac
 }
 
-get_os_record() {
-    local wanted="$1"
-    for line in "${OS_LIST[@]}"; do
-        IFS='|' read -r id type label qgos qgrel dram dcpu ddisk notes <<< "$line"
-        if [ "$id" = "$wanted" ]; then
-            echo "$line"
-            return 0
-        fi
-    done
-    return 1
-}
+main() {
+  require_bin "$QUICKGET_BIN"
 
-sanitize_name() {
-    echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g'
-}
+  mkdir -p "$VM_ROOT"
 
-print_header
-print_menu
+  echo
+  echo "Tiny VM Desktop - Quick Wizard"
+  echo "=============================="
+  echo
+  pick_preset
+  echo
 
-read -rp "Choose an OS by number: " CHOICE
+  read -rp "Choose OS preset: " preset_choice
 
-RECORD=$(get_os_record "$CHOICE") || {
-    echo "Invalid choice."
+  quickget_args=""
+  if quickget_args="$(resolve_quickget_args "$preset_choice")"; then
+    :
+  else
+    status=$?
+    if [[ $status -eq 1 ]]; then
+      read -rp "Enter custom quickget arguments (example: windows 10): " quickget_args
+    else
+      echo "Invalid selection."
+      exit 1
+    fi
+  fi
+
+  read -rp "Enter VM name: " vm_name
+  vm_name="$(slugify "$vm_name")"
+
+  if [[ -z "$vm_name" ]]; then
+    echo "VM name cannot be empty."
     exit 1
+  fi
+
+  read -rp "RAM in MB (example 4096): " ram
+  read -rp "CPU cores (example 4): " cpu
+  read -rp "Disk size in GB (example 64): " disk
+
+  [[ -z "$ram" ]] && ram="4096"
+  [[ -z "$cpu" ]] && cpu="2"
+  [[ -z "$disk" ]] && disk="64"
+
+  vm_dir="${VM_ROOT}/${vm_name}"
+
+  if [[ -e "$vm_dir" ]]; then
+    echo "ERROR: VM directory already exists: $vm_dir"
+    exit 1
+  fi
+
+  mkdir -p "$vm_dir"
+  cd "$vm_dir"
+
+  echo
+  echo "Running: $QUICKGET_BIN $quickget_args"
+  echo "Target:  $vm_dir"
+  echo
+
+  # shellcheck disable=SC2086
+  "$QUICKGET_BIN" $quickget_args
+
+  conf_file="$(find "$vm_dir" -maxdepth 1 -type f -name "*.conf" | head -n1 || true)"
+
+  if [[ -z "$conf_file" ]]; then
+    echo "ERROR: quickget did not produce a .conf file in $vm_dir"
+    exit 1
+  fi
+
+  base_name="$(basename "$conf_file" .conf)"
+  desired_conf="${vm_dir}/${vm_name}.conf"
+
+  if [[ "$(basename "$conf_file")" != "${vm_name}.conf" ]]; then
+    mv "$conf_file" "$desired_conf"
+    conf_file="$desired_conf"
+  fi
+
+  disk_file="$(find "$vm_dir" -maxdepth 1 -type f -name "*.qcow2" | head -n1 || true)"
+  if [[ -n "$disk_file" && "$(basename "$disk_file")" != "${vm_name}.qcow2" ]]; then
+    mv "$disk_file" "${vm_dir}/${vm_name}.qcow2"
+  fi
+
+  set_or_add_conf_value "ram" "$ram" "$conf_file"
+  set_or_add_conf_value "cpu_cores" "$cpu" "$conf_file"
+
+  # Best effort disk size key for quickemu configs.
+  # Some templates use disk_img; the actual size may depend on the first run or qcow image creation.
+  # We still append a helpful metadata comment.
+  {
+    echo
+    echo "# Tiny VM Desktop requested disk size: ${disk}G"
+  } >> "$conf_file"
+
+  echo
+  echo "VM created."
+  echo "Config: $conf_file"
+  echo "RAM:    $ram MB"
+  echo "CPU:    $cpu"
+  echo "Disk:   requested ${disk}G"
+  echo
+  echo "Note: disk sizing behavior varies by quickget/quickemu template."
+  echo "If needed later, resize manually with:"
+  echo "  qemu-img resize <diskfile>.qcow2 +20G"
+  echo
+
+  "${BIN_DIR}/tinyvm-scan-vms.sh" >/dev/null
 }
 
-IFS='|' read -r ID TYPE LABEL QUICKGET_OS QUICKGET_RELEASE DEFAULT_RAM DEFAULT_CPU DEFAULT_DISK NOTES <<< "$RECORD"
-
-print_header
-echo "Selected: $LABEL"
-echo
-echo "Helper:"
-echo "  Recommended RAM:    ${DEFAULT_RAM} MB"
-echo "  Recommended CPU:    ${DEFAULT_CPU}"
-echo "  Recommended disk:   ${DEFAULT_DISK} GB"
-echo "  Notes:              $NOTES"
-echo
-echo "Your host:"
-echo "  Max physical RAM:   ${TOTAL_RAM_MB} MB"
-echo "  Max CPU threads:    ${CPU_THREADS}"
-echo "  Safer RAM target:   ${SAFE_RAM_MB} MB"
-echo "  Safer CPU target:   ${SAFE_CPU}"
-echo
-
-DEFAULT_VM_NAME=$(sanitize_name "$LABEL")
-
-read -rp "VM name [$DEFAULT_VM_NAME]: " VM_NAME
-VM_NAME="${VM_NAME:-$DEFAULT_VM_NAME}"
-VM_NAME=$(sanitize_name "$VM_NAME")
-
-read -rp "RAM in MB [$DEFAULT_RAM]: " RAM_MB
-RAM_MB="${RAM_MB:-$DEFAULT_RAM}"
-
-read -rp "CPU cores [$DEFAULT_CPU]: " CPU_CORES
-CPU_CORES="${CPU_CORES:-$DEFAULT_CPU}"
-
-read -rp "Disk size in GB [$DEFAULT_DISK]: " DISK_GB
-DISK_GB="${DISK_GB:-$DEFAULT_DISK}"
-
-echo
-if [ "$RAM_MB" -gt "$SAFE_RAM_MB" ]; then
-    echo "Warning: chosen RAM is above the safer VM RAM target."
-fi
-if [ "$CPU_CORES" -gt "$SAFE_CPU" ]; then
-    echo "Warning: chosen CPU count is above the safer VM CPU target."
-fi
-echo
-
-VM_PATH="$VM_DIR/$VM_NAME"
-mkdir -p "$VM_PATH"
-CONF_FILE="$VM_PATH/$VM_NAME.conf"
-
-echo "Running quickget for $LABEL ..."
-cd "$VM_PATH"
-
-if [ -n "$QUICKGET_RELEASE" ]; then
-    quickget "$QUICKGET_OS" "$QUICKGET_RELEASE"
-else
-    quickget "$QUICKGET_OS"
-fi
-
-GENERATED_CONF=$(find "$VM_PATH" -maxdepth 1 -name "*.conf" | head -n 1 || true)
-
-if [ -z "$GENERATED_CONF" ] || [ ! -f "$GENERATED_CONF" ]; then
-    echo
-    echo "quickget did not create a config file as expected."
-    exit 1
-fi
-
-echo "quickget created config: $GENERATED_CONF"
-
-cp "$GENERATED_CONF" "$CONF_FILE"
-
-# Override user-selected values
-sed -i '/^ram=/d' "$CONF_FILE" || true
-sed -i '/^cpu_cores=/d' "$CONF_FILE" || true
-sed -i '/^disk_size=/d' "$CONF_FILE" || true
-
-{
-    echo "ram=\"${RAM_MB}\""
-    echo "cpu_cores=\"${CPU_CORES}\""
-    echo "disk_size=\"${DISK_GB}G\""
-} >> "$CONF_FILE"
-
-echo
-echo "Config created:"
-echo "  $CONF_FILE"
-echo
-
-read -rp "Launch now? [Y/n]: " LAUNCH_NOW
-LAUNCH_NOW="${LAUNCH_NOW:-Y}"
-
-if [[ "$LAUNCH_NOW" =~ ^[Yy]$ ]]; then
-    cd "$VM_PATH"
-    quickemu --vm "$CONF_FILE"
-else
-    echo
-    echo "You can launch later with:"
-    echo "  cd \"$VM_PATH\" && quickemu --vm \"$CONF_FILE\""
-fi
-
-SCRIPT END --------------------------------------------------
+main "$@"
+------------------------------------------------------------------------------------------
 
 chmod +x /home/VM/tinyvm/bin/tinyvm-quick-wizard.sh
 
-/home/VM/tinyvm/bin/tinyvm-quick-wizard.sh
+nano /home/VM/tinyvm/bin/tinyvm-manual-wizard.sh
+-------------------------------------------------------------------------------
+#!/usr/bin/env bash
+set -euo pipefail
+
+CONFIG_FILE="/home/VM/tinyvm/config/tinyvm.conf"
+# shellcheck source=/dev/null
+source "$CONFIG_FILE"
+
+require_bin() {
+  local bin="$1"
+  if ! command -v "$bin" >/dev/null 2>&1; then
+    echo "ERROR: Required command not found: $bin"
+    exit 1
+  fi
+}
+
+slugify() {
+  printf '%s' "$1" \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed 's/[^a-z0-9._-]/-/g; s/--*/-/g; s/^-//; s/-$//'
+}
+
+main() {
+  require_bin qemu-img
+
+  mkdir -p "$VM_ROOT"
+
+  echo
+  echo "Tiny VM Desktop - Manual / Legacy Wizard"
+  echo "========================================"
+  echo
+
+  read -rp "Enter VM name: " vm_name
+  vm_name="$(slugify "$vm_name")"
+
+  if [[ -z "$vm_name" ]]; then
+    echo "VM name cannot be empty."
+    exit 1
+  fi
+
+  echo
+  echo "Guest OS options:"
+  echo "1) windows"
+  echo "2) macos"
+  echo "3) linux"
+  echo
+
+  read -rp "Choose guest OS type: " os_choice
+  case "$os_choice" in
+    1) guest_os="windows" ;;
+    2) guest_os="macos" ;;
+    3) guest_os="linux" ;;
+    *) echo "Invalid choice."; exit 1 ;;
+  esac
+
+  read -rp "Full path to ISO (or recovery image if appropriate): " iso_path
+  if [[ ! -f "$iso_path" ]]; then
+    echo "ERROR: File not found: $iso_path"
+    exit 1
+  fi
+
+  read -rp "RAM in MB (example 4096): " ram
+  read -rp "CPU cores (example 4): " cpu
+  read -rp "Disk size in GB (example 64): " disk
+
+  [[ -z "$ram" ]] && ram="4096"
+  [[ -z "$cpu" ]] && cpu="2"
+  [[ -z "$disk" ]] && disk="64"
+
+  vm_dir="${VM_ROOT}/${vm_name}"
+  mkdir -p "$vm_dir"
+
+  iso_name="$(basename "$iso_path")"
+  target_iso="${vm_dir}/${iso_name}"
+
+  if [[ "$iso_path" != "$target_iso" ]]; then
+    cp -n "$iso_path" "$target_iso"
+  fi
+
+  disk_file="${vm_dir}/${vm_name}.qcow2"
+  conf_file="${vm_dir}/${vm_name}.conf"
+
+  if [[ ! -f "$disk_file" ]]; then
+    qemu-img create -f qcow2 "$disk_file" "${disk}G" >/dev/null
+  fi
+
+  cat > "$conf_file" <<EOF
+guest_os="${guest_os}"
+disk_img="${disk_file}"
+iso="${target_iso}"
+ram="${ram}"
+cpu_cores="${cpu}"
+display_device="virtio-vga"
+boot="legacy"
+EOF
+
+  echo
+  echo "Manual VM created."
+  echo "Config: $conf_file"
+  echo "Disk:   $disk_file"
+  echo "ISO:    $target_iso"
+  echo
+
+  "${BIN_DIR}/tinyvm-scan-vms.sh" >/dev/null
+}
+
+main "$@"
+-----------------------------------------------------------------
+
+chmod +x /home/VM/tinyvm/bin/tinyvm-manual-wizard.sh
+
+nano /home/VM/tinyvm/bin/tinyvm-manager.sh
+
+-----------------------------------------------------------------
+#!/usr/bin/env bash
+set -euo pipefail
+
+CONFIG_FILE="/home/VM/tinyvm/config/tinyvm.conf"
+# shellcheck source=/dev/null
+source "$CONFIG_FILE"
+
+pause() {
+  echo
+  read -rp "Press Enter to continue..." _
+}
+
+show_header() {
+  clear 2>/dev/null || true
+  echo "Tiny VM Desktop"
+  echo "==============="
+  echo "VM Root:   $VM_ROOT"
+  echo "Display:   $DISPLAY_MODE"
+  echo
+}
+
+show_vm_summary() {
+  if [[ ! -f "$VM_INDEX_FILE" ]]; then
+    "${BIN_DIR}/tinyvm-scan-vms.sh" >/dev/null 2>&1 || true
+  fi
+
+  local count=0
+  if [[ -f "$VM_INDEX_FILE" ]]; then
+    count="$(wc -l < "$VM_INDEX_FILE" 2>/dev/null || echo 0)"
+  fi
+
+  echo "Detected VMs: $count"
+  echo
+}
+
+create_menu() {
+  echo "1) Create VM"
+  echo "2) Launch VM"
+  echo "3) Edit VM"
+  echo "4) Delete VM"
+  echo "5) Scan / Refresh VM List"
+  echo "6) View VM List"
+  echo "7) Exit"
+  echo
+}
+
+create_vm_submenu() {
+  echo
+  echo "Create VM"
+  echo "---------"
+  echo "1) Quick Wizard"
+  echo "2) Manual / Legacy Wizard"
+  echo "3) Back"
+  echo
+}
+
+view_vm_list() {
+  if [[ ! -f "$VM_INDEX_FILE" ]]; then
+    "${BIN_DIR}/tinyvm-scan-vms.sh" >/dev/null
+  fi
+
+  if [[ ! -s "$VM_INDEX_FILE" ]]; then
+    echo "No VMs found."
+    return
+  fi
+
+  printf '%-4s %-24s %-12s %-10s %-8s %s\n' "No." "Name" "OS" "RAM" "CPU" "Config"
+  echo "------------------------------------------------------------------------------------------------"
+  local i=1
+  while IFS='|' read -r vm_name os_type ram cpu disk conf_path; do
+    [[ -z "$vm_name" ]] && continue
+    printf '%-4s %-24s %-12s %-10s %-8s %s\n' "$i" "$vm_name" "$os_type" "$ram" "$cpu" "$conf_path"
+    i=$((i + 1))
+  done < "$VM_INDEX_FILE"
+}
+
+main_loop() {
+  while true; do
+    show_header
+    show_vm_summary
+    create_menu
+    read -rp "Choose an option: " choice
+
+    case "$choice" in
+      1)
+        show_header
+        create_vm_submenu
+        read -rp "Choose create mode: " create_choice
+        case "$create_choice" in
+          1) "${BIN_DIR}/tinyvm-quick-wizard.sh"; pause ;;
+          2) "${BIN_DIR}/tinyvm-manual-wizard.sh"; pause ;;
+          3) ;;
+          *) echo "Invalid option."; pause ;;
+        esac
+        ;;
+      2)
+        "${BIN_DIR}/tinyvm-launch-existing.sh"
+        ;;
+      3)
+        "${BIN_DIR}/tinyvm-edit-vm.sh"
+        pause
+        ;;
+      4)
+        "${BIN_DIR}/tinyvm-delete-vm.sh"
+        pause
+        ;;
+      5)
+        "${BIN_DIR}/tinyvm-scan-vms.sh"
+        pause
+        ;;
+      6)
+        show_header
+        view_vm_list
+        pause
+        ;;
+      7)
+        echo "Goodbye."
+        exit 0
+        ;;
+      *)
+        echo "Invalid option."
+        pause
+        ;;
+    esac
+  done
+}
+
+main_loop "$@"
+----------------------------------------------------------------
+chmod +x /home/VM/tinyvm/bin/tinyvm-manager.sh
+
+chmod +x /home/VM/tinyvm/bin/*.sh
+
+sudo ln -sf /home/VM/tinyvm/bin/tinyvm-manager.sh /usr/local/bin/tinyvm
+
+RUN IN TERMINAL:
+tinyvm
+or
+/home/VM/tinyvm/bin/tinyvm-manager.sh
 
 
 
-ICEWM ENTRY
 
-prog "Tiny VM Quick Setup" exec lxterminal -e bash -lc '/home/VM/tinyvm/bin/tinyvm-quick-wizard.sh; echo; echo "Press Enter to close..."; read'
 
-icewm --restart
+
+
 
