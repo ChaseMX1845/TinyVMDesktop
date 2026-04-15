@@ -697,8 +697,8 @@ cd "$INSTALLERS_DIR"
 chmod +x /home/VM/tinyvm/macos/scripts/build-macos-iso.sh
 
 nano /home/VM/.icewm/menu
-prog "macOS ISO Builder" exec /home/VM/tinyvm/macos/scripts/build-macos-iso.sh
-prog "macOS Launcher" exec /home/VM/tinyvm/macos/scripts/launch-macos.sh
+prog "macOS ISO Builder" exec lxterminal -e bash -lc '/home/VM/tinyvm/macos/scripts/build-macos-iso.sh; echo; echo "Press Enter to close..."; read'
+prog "macOS Launcher" exec lxterminal -e bash -lc '/home/VM/tinyvm/macos/scripts/launch-macos.sh; echo; echo "Press Enter to close..."; read'
 
 icewm --restart
 
