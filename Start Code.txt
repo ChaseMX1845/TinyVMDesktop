@@ -1,152 +1,310 @@
-CODE
+mkdir -p /home/VM/tinyvm/bin
+mkdir -p /home/VM/tinyvm/quickemu-vms
+mkdir -p /home/VM/tinyvm/isos
 
 
-mkdir -p /home/vm/tinyvm/{bin,profiles,isos,vms}
 
+WIZARD SCRIPT
 
-Then 
+nano /home/VM/tinyvm/bin/tinyvm-wizard.sh
 
-
-nano /home/vm/tinyvm/bin/create-vm.sh
-
-
-PASTE THIS INTO IT:
--------------------------------------------------------
-
-
+SCRIPT -----------------------------------
 #!/bin/bash
 
 set -e
 
-BASE_DIR="/home/vm/tinyvm"
-VM_DIR="$BASE_DIR/vms"
-ISO_DIR="$BASE_DIR/isos"
+BASE="/home/VM/tinyvm"
+VM_DIR="$BASE/quickemu-vms"
+ISO_DIR="$BASE/isos"
 
-PROFILE_FILE="$1"
+mkdir -p "$VM_DIR" "$ISO_DIR"
 
-if [ -z "$PROFILE_FILE" ] || [ ! -f "$PROFILE_FILE" ]; then
-    echo "Profile file missing."
-    exit 1
+# ----------------------------
+# Host stats
+# ----------------------------
+TOTAL_RAM_KB=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
+TOTAL_RAM_MB=$((TOTAL_RAM_KB / 1024))
+TOTAL_RAM_GB=$((TOTAL_RAM_MB / 1024))
+
+CPU_THREADS=$(nproc --all)
+
+# Conservative recommended host-safe limits for a nested VM lab
+SAFE_RAM_MB=$((TOTAL_RAM_MB / 2))
+SAFE_RAM_GB=$((SAFE_RAM_MB / 1024))
+SAFE_CPU=$((CPU_THREADS / 2))
+if [ "$SAFE_CPU" -lt 1 ]; then
+    SAFE_CPU=1
 fi
 
-# shellcheck disable=SC1090
-source "$PROFILE_FILE"
+# ----------------------------
+# OS catalog
+# id|type|label|quickget_os|quickget_release|default_ram|default_cpu|default_disk|notes
+# ----------------------------
+readarray -t OS_LIST <<'EOF'
+1|windows|Windows 95|||128|1|2|Legacy. Experimental. Use existing ISO path manually.
+2|windows|Windows 98|||256|1|4|Legacy. Experimental. Use existing ISO path manually.
+3|windows|Windows XP|||1024|1|20|Legacy. Experimental. Use existing ISO path manually.
+4|windows|Windows 7|||2048|2|30|Use existing ISO path manually.
+5|windows|Windows 8|||4096|2|40|Use existing ISO path manually.
+6|windows|Windows 10|windows|10|4096|2|64|Recommended for modern Windows testing.
+7|windows|Windows 11|windows|11|8192|4|96|Needs stronger resources; may need install bypasses depending on image.
+8|macos|macOS Lion|||2048|2|40|Legacy macOS. Experimental.
+9|macos|macOS Mountain Lion|||2048|2|40|Legacy macOS. Experimental.
+10|macos|macOS Mavericks|||3072|2|50|Legacy macOS. Experimental.
+11|macos|macOS Yosemite|||3072|2|50|Legacy macOS. Experimental.
+12|macos|macOS El Capitan|||4096|2|50|Legacy macOS. Experimental.
+13|macos|macOS Sierra|||4096|2|50|Legacy macOS. Experimental.
+14|macos|macOS High Sierra|macos|high-sierra|4096|2|50|Good older macOS starting point.
+15|macos|macOS Mojave|macos|mojave|4096|2|55|Stable older macOS option.
+16|macos|macOS Catalina|macos|catalina|6144|4|64|Good macOS test target.
+17|macos|macOS Big Sur|macos|big-sur|8192|4|80|Modern macOS; heavier.
+18|macos|macOS Monterey|macos|monterey|8192|4|90|Modern macOS; good target.
+19|macos|macOS Ventura|macos|ventura|8192|4|100|Modern macOS; heavier.
+20|macos|macOS Sonoma|macos|sonoma|8192|4|110|Newer macOS; heavier.
+21|macos|macOS Sequoia|macos|sequoia|8192|4|120|Very new macOS; demanding.
+22|macos|macOS Tahoe|macos|tahoe|8192|4|120|Latest generation target; most demanding.
+EOF
 
-echo "=============================="
-echo "Tiny VM Desktop - Create VM"
-echo "=============================="
-echo "Profile: $PROFILE_NAME"
+# ----------------------------
+# helpers
+# ----------------------------
+print_header() {
+    clear
+    echo "======================================="
+    echo "         Tiny VM Desktop Wizard"
+    echo "======================================="
+    echo
+    echo "Host stats:"
+    echo "  Total RAM:          ${TOTAL_RAM_MB} MB (~${TOTAL_RAM_GB} GB)"
+    echo "  CPU threads:        ${CPU_THREADS}"
+    echo "  Safer VM RAM cap:   ${SAFE_RAM_MB} MB (~${SAFE_RAM_GB} GB)"
+    echo "  Safer VM CPU cap:   ${SAFE_CPU}"
+    echo
+    echo "Tip:"
+    echo "  Because you are testing inside a VM, do NOT allocate the full host."
+    echo "  Staying at or below the safer caps is a better starting point."
+    echo
+}
+
+print_menu() {
+    echo "Windows:"
+    for line in "${OS_LIST[@]}"; do
+        IFS='|' read -r id type label qgos qgrel dram dcpu ddisk notes <<< "$line"
+        if [ "$type" = "windows" ]; then
+            printf "  %2s) %s\n" "$id" "$label"
+        fi
+    done
+    echo
+    echo "macOS:"
+    for line in "${OS_LIST[@]}"; do
+        IFS='|' read -r id type label qgos qgrel dram dcpu ddisk notes <<< "$line"
+        if [ "$type" = "macos" ]; then
+            printf "  %2s) %s\n" "$id" "$label"
+        fi
+    done
+    echo
+}
+
+get_os_record() {
+    local wanted="$1"
+    for line in "${OS_LIST[@]}"; do
+        IFS='|' read -r id type label qgos qgrel dram dcpu ddisk notes <<< "$line"
+        if [ "$id" = "$wanted" ]; then
+            echo "$line"
+            return 0
+        fi
+    done
+    return 1
+}
+
+sanitize_name() {
+    echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g'
+}
+
+# ----------------------------
+# choose OS
+# ----------------------------
+print_header
+print_menu
+
+read -rp "Choose an OS by number: " CHOICE
+
+RECORD=$(get_os_record "$CHOICE") || {
+    echo "Invalid choice."
+    exit 1
+}
+
+IFS='|' read -r ID TYPE LABEL QUICKGET_OS QUICKGET_RELEASE DEFAULT_RAM DEFAULT_CPU DEFAULT_DISK NOTES <<< "$RECORD"
+
+print_header
+echo "Selected: $LABEL"
 echo
+echo "Helper:"
+echo "  Recommended RAM:    ${DEFAULT_RAM} MB"
+echo "  Recommended CPU:    ${DEFAULT_CPU}"
+echo "  Recommended disk:   ${DEFAULT_DISK} GB"
+echo "  Notes:              $NOTES"
+echo
+echo "Your host:"
+echo "  Max physical RAM:   ${TOTAL_RAM_MB} MB"
+echo "  Max CPU threads:    ${CPU_THREADS}"
+echo "  Safer RAM target:   ${SAFE_RAM_MB} MB"
+echo "  Safer CPU target:   ${SAFE_CPU}"
+echo
+
+DEFAULT_VM_NAME=$(sanitize_name "$LABEL")
 
 read -rp "VM name [$DEFAULT_VM_NAME]: " VM_NAME
 VM_NAME="${VM_NAME:-$DEFAULT_VM_NAME}"
+VM_NAME=$(sanitize_name "$VM_NAME")
 
 read -rp "RAM in MB [$DEFAULT_RAM]: " RAM_MB
 RAM_MB="${RAM_MB:-$DEFAULT_RAM}"
 
-read -rp "CPU cores [$DEFAULT_CPUS]: " CPU_CORES
-CPU_CORES="${CPU_CORES:-$DEFAULT_CPUS}"
+read -rp "CPU cores [$DEFAULT_CPU]: " CPU_CORES
+CPU_CORES="${CPU_CORES:-$DEFAULT_CPU}"
 
-read -rp "Max disk size in GB [$DEFAULT_DISK_GB]: " DISK_GB
-DISK_GB="${DISK_GB:-$DEFAULT_DISK_GB}"
+read -rp "Disk size in GB [$DEFAULT_DISK]: " DISK_GB
+DISK_GB="${DISK_GB:-$DEFAULT_DISK}"
 
 echo
-echo "ISO path examples:"
-echo "  $ISO_DIR"
-echo "  /home/vm/Downloads"
-echo
-
-read -rp "Full ISO path: " ISO_PATH
-
-if [ ! -f "$ISO_PATH" ]; then
-    echo "ISO not found: $ISO_PATH"
-    exit 1
+if [ "$RAM_MB" -gt "$SAFE_RAM_MB" ]; then
+    echo "Warning: chosen RAM is above the safer VM RAM target."
 fi
+if [ "$CPU_CORES" -gt "$SAFE_CPU" ]; then
+    echo "Warning: chosen CPU count is above the safer VM CPU target."
+fi
+echo
 
 VM_PATH="$VM_DIR/$VM_NAME"
-DISK_PATH="$VM_PATH/${VM_NAME}.qcow2"
-
 mkdir -p "$VM_PATH"
+CONF_FILE="$VM_PATH/$VM_NAME.conf"
 
-if [ -f "$DISK_PATH" ]; then
-    echo "Disk already exists: $DISK_PATH"
-    exit 1
+# ----------------------------
+# Build config
+# ----------------------------
+# Quickemu config style varies a bit by guest type/version.
+# This wizard uses a practical minimal config and adds user values.
+# For supported quickget guests, it can download first if the user wants.
+# For older/manual guests, the user points to an ISO path.
+# ----------------------------
+
+echo "Installer source options:"
+echo "  1) Download/prep automatically (if supported by quickget)"
+echo "  2) Use an existing ISO/image path manually"
+echo
+read -rp "Choose source [1]: " SRC_CHOICE
+SRC_CHOICE="${SRC_CHOICE:-1}"
+
+USE_MANUAL_ISO="no"
+INSTALLER_PATH=""
+
+if [ "$SRC_CHOICE" = "1" ]; then
+    if [ -n "$QUICKGET_OS" ] && [ -n "$QUICKGET_RELEASE" ]; then
+        echo
+        echo "Running quickget for $LABEL ..."
+        cd "$VM_PATH"
+        quickget "$QUICKGET_OS" "$QUICKGET_RELEASE"
+        GENERATED_CONF=$(find "$VM_PATH" -maxdepth 1 -name "*.conf" | head -n 1 || true)
+
+        if [ -z "$GENERATED_CONF" ]; then
+            echo "quickget did not generate a config file as expected."
+            exit 1
+        fi
+
+        # Merge/override with user-selected limits
+        cp "$GENERATED_CONF" "$CONF_FILE"
+
+        # Remove any existing values we want to control
+        sed -i '/^ram=/d' "$CONF_FILE" || true
+        sed -i '/^cpu_cores=/d' "$CONF_FILE" || true
+        sed -i '/^disk_size=/d' "$CONF_FILE" || true
+
+        {
+            echo "ram=\"${RAM_MB}\""
+            echo "cpu_cores=\"${CPU_CORES}\""
+            echo "disk_size=\"${DISK_GB}G\""
+        } >> "$CONF_FILE"
+
+    else
+        echo
+        echo "This OS does not have automatic quickget support in this wizard yet."
+        echo "Falling back to manual ISO/image mode."
+        USE_MANUAL_ISO="yes"
+    fi
+else
+    USE_MANUAL_ISO="yes"
+fi
+
+if [ "$USE_MANUAL_ISO" = "yes" ]; then
+    echo
+    echo "Enter the full path to your ISO/image."
+    echo "Examples:"
+    echo "  $ISO_DIR"
+    echo "  /home/VM/Downloads"
+    echo
+    read -rp "Installer ISO/image path: " INSTALLER_PATH
+
+    if [ ! -f "$INSTALLER_PATH" ]; then
+        echo "File not found: $INSTALLER_PATH"
+        exit 1
+    fi
+
+    # Manual quickemu config
+    # This is intentionally simple and conservative.
+    cat > "$CONF_FILE" <<EOF2
+guest_os="${TYPE}"
+disk_img="${VM_NAME}.qcow2"
+disk_size="${DISK_GB}G"
+ram="${RAM_MB}"
+cpu_cores="${CPU_CORES}"
+iso="${INSTALLER_PATH}"
+EOF2
+
+    # Add a more specific guest hint where useful
+    case "$TYPE" in
+        windows)
+            echo "boot=\"legacy\"" >> "$CONF_FILE"
+            ;;
+        macos)
+            echo "guest_os=\"macos\"" >> "$CONF_FILE"
+            ;;
+    esac
 fi
 
 echo
-echo "Creating thin-provisioned qcow2 disk..."
-qemu-img create -f qcow2 "$DISK_PATH" "${DISK_GB}G"
-
+echo "Config created:"
+echo "  $CONF_FILE"
 echo
-echo "Creating VM..."
-virt-install \
-  --connect qemu:///session \
-  --name "$VM_NAME" \
-  --memory "$RAM_MB" \
-  --vcpus "$CPU_CORES" \
-  --disk path="$DISK_PATH",format=qcow2,bus=virtio \
-  --cdrom "$ISO_PATH" \
-  --os-variant "$OS_VARIANT" \
-  --network network=default,model=virtio \
-  --graphics spice \
-  --video qxl \
-  --sound ich9 \
-  --boot cdrom,hd \
-  --noautoconsole
 
-echo
-echo "VM created successfully."
-echo "Disk: $DISK_PATH"
-echo
-echo "Open it with:"
-echo "virt-manager --connect qemu:///session"
+read -rp "Launch now? [Y/n]: " LAUNCH_NOW
+LAUNCH_NOW="${LAUNCH_NOW:-Y}"
 
+if [[ "$LAUNCH_NOW" =~ ^[Yy]$ ]]; then
+    cd "$VM_PATH"
+    quickemu --vm "$CONF_FILE"
+else
+    echo
+    echo "You can launch later with:"
+    echo "  cd \"$VM_PATH\" && quickemu --vm \"$CONF_FILE\""
+fi
 
+SCRIPT END --------------------------------------
 
-END
---------------------------
-NOW:
+chmod +x /home/VM/tinyvm/bin/tinyvm-wizard.sh
 
-Make it executable:
-chmod +x /home/vm/tinyvm/bin/create-vm.sh
+sudo apt update
+sudo apt install bash coreutils curl wget qemu-system-x86 qemu-utils ovmf
 
+TEST
+quickemu --version
+quickget --help
 
+RUN - /home/VM/tinyvm/bin/tinyvm-wizard.sh
 
-RUN IT WITH:
-/home/vm/tinyvm/bin/tinyvm-menu.sh
+nano /home/VM/.icewm/menu
 
+prog "Tiny VM Wizard" exec lxterminal -e bash -lc '/home/VM/tinyvm/bin/tinyvm-wizard.sh; echo; echo "Press Enter to close..."; read'
 
-
---------------------------------------------------------------------
-
-
-Add to IceWM Menu
-
-nano /home/vm/.icewm/menu
-
-ADD THIS BLOCK AT THE END OF LIST:
-
-prog "Tiny VM Desktop" exec /home/vm/tinyvm/bin/tinyvm-menu.sh
-
-SAVE AND EXIT
-
-
-NOW: 
 icewm --restart
-
-
---------------------------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-
-
 
