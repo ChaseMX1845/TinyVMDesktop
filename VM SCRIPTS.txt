@@ -648,4 +648,64 @@ prog "macOS Launcher" exec /home/VM/tinyvm/macos/scripts/launch-macos.sh
 icewm --restart
 
 
+-----------------------------------------------------------------------------------------
+
+nano /home/VM/tinyvm/macos/scripts/build-macos-iso.sh
+
+
+SCRIPT:
+
+#!/bin/bash
+
+set -e
+
+BASE="/home/VM/tinyvm/macos"
+INSTALLERS_DIR="$BASE/installers"
+TOOLS_DIR="$BASE/tools"
+LOCAL_BIN="$HOME/.local/bin"
+MKMACISO_URL="https://raw.githubusercontent.com/LongQT-sea/mkmaciso/main/mkmaciso"
+TARGET="$LOCAL_BIN/mkmaciso"
+
+mkdir -p "$INSTALLERS_DIR" "$TOOLS_DIR" "$LOCAL_BIN"
+
+if [ ! -f "$TARGET" ]; then
+    echo "Downloading mkmaciso..."
+    curl -fsSL "$MKMACISO_URL" -o "$TARGET"
+    chmod +x "$TARGET"
+fi
+
+if [[ ":$PATH:" != *":$LOCAL_BIN:"* ]]; then
+    export PATH="$LOCAL_BIN:$PATH"
+fi
+
+echo "================================"
+echo "Tiny VM Desktop - macOS ISO Tool"
+echo "================================"
+echo
+echo "This will run mkmaciso and save output under:"
+echo "  $INSTALLERS_DIR"
+echo
+echo "When prompted by the tool, choose/create the installer image there."
+echo
+
+cd "$INSTALLERS_DIR"
+"$TARGET" "$@"
+
+
+---------------------------------------------------------------------------------------
+
+chmod +x /home/VM/tinyvm/macos/scripts/build-macos-iso.sh
+
+nano /home/VM/.icewm/menu
+prog "macOS ISO Builder" exec /home/VM/tinyvm/macos/scripts/build-macos-iso.sh
+prog "macOS Launcher" exec /home/VM/tinyvm/macos/scripts/launch-macos.sh
+
+icewm --restart
+
+use: /home/VM/tinyvm/macos/scripts/build-macos-iso.sh
+then: /home/VM/tinyvm/macos/scripts/launch-macos.sh
+
+
+
+
 
